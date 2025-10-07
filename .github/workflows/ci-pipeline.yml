@@ -46,8 +46,7 @@ jobs:
           IS_PROD: ${{ github.ref_type == 'tag' && !contains(github.ref_name, '-rc') }}
         with:
           script: |
-            const core = require('@actions/core')
-            const fs = require('node:fs')
+            const fs = require('fs')
             let appVars = undefined
             const varsObj = ${{ toJSON(vars) }}
 
@@ -189,15 +188,10 @@ jobs:
            ref: main
            token: ${{ secrets.GITHUBTOKEN }}
 
-       - uses: actions/github-script@v7
-         name: Write environment file
-         id: write-env
-         with:
-            script: |
-              const fs = require('fs')
-              const file = Buffer.from("${{ needs.build.outputs.envFile }}", 'base64').toString('ascii')
-              console.log("Decoded File Content:", file)
-              fs.writeFileSync("${{ needs.build.outputs.kustomize_folder }}/${{ env.ENV_FILEPATH }}", file, { encoding: 'utf8' })
+       - name: Write environment file
+         run: |
+           echo "${{ needs.build.outputs.envFile }}" | base64 -d > ${{ needs.build.outputs.kustomize_folder }}/${{ env.ENV_FILEPATH }}
+           echo "Environment file created at ${{ needs.build.outputs.kustomize_folder }}/${{ env.ENV_FILEPATH }}"
 
        - run: |
            git config user.name "${{ env.GITHUB_SA_USER }}"
