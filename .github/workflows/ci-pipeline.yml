@@ -18,27 +18,9 @@ env:
   AZURE_DEVOPS_EXT_PAT: ${{ secrets.AZURE_DEVOPS_PAT }}
 
 jobs:
-  sonarqube:
-     name: sonarqube
-     runs-on: ubuntu-latest
-     permissions: read-all
-     steps:
-       - uses: actions/checkout@v4
-         with:
-           fetch-depth: 0
-       - uses: sonarsource/sonarqube-scan-action@v2
-         env:
-           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-       # - uses: sonarsource/sonarqube-quality-gate-action@v2
-       #   timeout-minutes: 5
-       #   env:
-       #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
   build:
     runs-on: ubuntu-latest
     environment: build
-    needs: sonarqube
 
     outputs:
       docker_tag: ${{ steps.setenv.outputs.docker_tag }}
