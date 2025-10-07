@@ -48,11 +48,10 @@ jobs:
           script: |
             const core = require('@actions/core')
             const fs = require('node:fs')
-            const { GITHUB_STATE, GITHUB_OUTPUT } = process.env
             let appVars = undefined
             const varsObj = ${{ toJSON(vars) }}
 
-            selectVarsBy = (obj, envName) =>
+            const selectVarsBy = (obj, envName) =>
               Object.entries(obj)
               .filter(([key, _]) => !key.startsWith('GHA_') && key.endsWith(envName))
               .map(([key, val]) => [key.slice(0, -envName.length), val])
@@ -191,11 +190,11 @@ jobs:
            token: ${{ secrets.GITHUBTOKEN }}
 
        - uses: actions/github-script@v7
-         name: Set environment
-         id: setenv
+         name: Write environment file
+         id: write-env
          with:
             script: |
-              const fs = require('node:fs')
+              const fs = require('fs')
               const file = Buffer.from("${{ needs.build.outputs.envFile }}", 'base64').toString('ascii')
               console.log("Decoded File Content:", file)
               fs.writeFileSync("${{ needs.build.outputs.kustomize_folder }}/${{ env.ENV_FILEPATH }}", file, { encoding: 'utf8' })
