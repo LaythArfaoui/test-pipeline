@@ -1,0 +1,235 @@
+name: CI Pipeline
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+  security-events: write
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc*'
+    branches:
+      - dev
+
+env:
+  AZURE_DEVOPS_EXT_PAT: ${{ secrets.AZURE_DEVOPS_PAT }}
+
+jobs:
+  sonarqube:
+     name: sonarqube
+     runs-on: ['self-hosted','intellifish-be']
+     permissions: read-all
+     steps:
+       - uses: actions/checkout@v4
+         with:
+           fetch-depth: 0
+       - uses: sonarsource/sonarqube-scan-action@v2
+         env:
+           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+       # - uses: sonarsource/sonarqube-quality-gate-action@v2
+       #   timeout-minutes: 5
+       #   env:
+       #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  build:
+    runs-on: ["self-hosted","intellifish-be"]
+    environment: build
+    needs: sonarqube
+
+    outputs:
+      docker_tag: ${{ steps.setenv.outputs.docker_tag }}
+      helm_tag: ${{ steps.setenv.outputs.helm_tag }}
+      environment: ${{ steps.setenv.outputs.environment }}
+      environment_display: ${{ steps.setenv.outputs.environment_display }}
+      release_repo: ${{ steps.setenv.outputs.release_repo }}
+      helm_release_repo: ${{ steps.setenv.outputs.helm_release_repo }}
+      helm_folder: ${{ steps.setenv.outputs.helm_folder }}
+      kustomize_folder: ${{ steps.setenv.outputs.kustomize_folder }}
+      helm_values_section_name: ${{ steps.setenv.outputs.helm_values_section_name }}
+      envFile: ${{ steps.setenv.outputs.envFile }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/github-script@v7
+        name: Set environment
+        id: setenv
+        env:
+          IS_DEV: ${{ github.ref_type == 'branch' && github.ref_name == 'dev' }}
+          IS_STAGING: ${{ github.ref_type == 'tag' && contains(github.ref_name, '-rc') }}
+          IS_PROD: ${{ github.ref_type == 'tag' && !contains(github.ref_name, '-rc') }}
+        with:
+          script: |
+            const core = require('@actions/core')
+            const fs = require('node:fs')
+            const { GITHUB_STATE, GITHUB_OUTPUT } = process.env
+            let appVars = undefined
+            const varsObj = ${{ toJSON(vars) }}
+
+            selectVarsBy = (obj, envName) =>
+              Object.entries(obj)
+              .filter(([key, _]) => !key.startsWith('GHA_') && key.endsWith(envName))
+              .map(([key, val]) => [key.slice(0, -envName.length), val])
+
+            const stringToBool = (s) => s.toLowerCase() === "true"
+
+            if (stringToBool(process.env.IS_DEV)) {
+              core.setOutput("az_subscription_id", "${{ vars.GHA_AZ_SUBSCRIPTION_ID_DEV }}")
+              core.setOutput("environment", "development")
+              core.setOutput("environment_display", "Dev")
+              core.setOutput("release_repo", "${{ vars.GHA_RELEASE_REPO_DEV }}")
+              core.setOutput("helm_release_repo", "${{ vars.GHA_HELM_RELEASE_REPO }}")
+              core.setOutput("helm_folder","${{ vars.GHA_HELM_PROJECT_DEV }}" )
+              core.setOutput("kustomize_folder","${{ vars.GHA_PROJECT_REPO_DEV }}" )
+              core.setOutput("acr_name", "${{ vars.GHA_REGISTRY_NAME_DEV }}.${{ vars.GHA_REGISTRY_DOMAIN }}")
+              core.setOutput("acr_username", "${{ vars.ACR_USERNAME_DEV }}")
+              core.setOutput("acr_password", "${{ secrets.ACR_PASSWORD_DEV }}")
+              core.setOutput("docker_tag", `${{ vars.GHA_REGISTRY_NAME_DEV }}.${{ vars.GHA_REGISTRY_DOMAIN }}/${{ vars.GHA_IMAGE_NAME }}:${{ github.sha }}`)
+              core.setOutput("helm_values_section_name", "${{ vars.GHA_HELM_VALUES_SECTION_NAME }}")
+              core.setOutput("helm_tag", "${{ github.sha }}")
+              appVars = selectVarsBy(varsObj, '_DEV')
+              console.log("set development environment")
+            } else if (stringToBool(process.env.IS_STAGING)) {
+              core.setOutput("az_subscription_id", "${{ vars.GHA_AZ_SUBSCRIPTION_ID_STG }}")
+              core.setOutput("environment", "staging")
+              core.setOutput("environment_display", "Staging")
+              core.setOutput("release_repo", "${{ vars.GHA_RELEASE_REPO_STG }}")
+              core.setOutput("kustomize_folder","${{ vars.GHA_PROJECT_REPO_STG }}" )
+              core.setOutput("acr_username", "${{ vars.ACR_USERNAME_STG }}")
+              core.setOutput("acr_password", "${{ secrets.ACR_PASSWORD_STG }}")
+              core.setOutput("acr_name", "${{ vars.GHA_REGISTRY_NAME_STG }}.${{ vars.GHA_REGISTRY_DOMAIN }}")
+              core.setOutput("docker_tag", `${{ vars.GHA_REGISTRY_NAME_STG }}.${{ vars.GHA_REGISTRY_DOMAIN }}/${{ vars.GHA_IMAGE_NAME }}:${{ github.ref_name }}`)
+              core.setOutput("helm_values_section_name", "${{ vars.GHA_HELM_VALUES_SECTION_NAME}}")
+              core.setOutput("helm_tag", "${{ github.ref_name }}")
+              core.setOutput("helm_release_repo", "${{ vars.GHA_HELM_RELEASE_REPO }}")
+              core.setOutput("helm_folder","${{ vars.GHA_HELM_PROJECT_STG }}" )
+              appVars = selectVarsBy(varsObj, '_STG')
+              console.log("set staging environment")
+            } else if (stringToBool(process.env.IS_PROD)) {
+              core.setOutput("az_subscription_id", "${{ vars.GHA_AZ_SUBSCRIPTION_ID_PRD }}")
+              core.setOutput("environment", "production")
+              core.setOutput("environment_display", "Production")
+              core.setOutput("release_repo", "${{ vars.GHA_RELEASE_REPO_PRD }}")
+              core.setOutput("acr_username", "${{ vars.ACR_USERNAME_PRD }}")
+              core.setOutput("acr_password", "${{ secrets.ACR_PASSWORD_PRD }}")
+              core.setOutput("kustomize_folder","${{ vars.GHA_PROJECT_REPO_PRD }}" )
+              core.setOutput("acr_name", "${{ vars.GHA_REGISTRY_NAME_PRD }}.${{ vars.GHA_REGISTRY_DOMAIN }}")
+              core.setOutput("docker_tag", `${{ vars.GHA_REGISTRY_NAME_PRD }}.${{ vars.GHA_REGISTRY_DOMAIN }}/${{ vars.GHA_IMAGE_NAME }}:${{ github.ref_name }}`)
+              core.setOutput("helm_values_section_name", "${{ vars.GHA_HELM_VALUES_SECTION_NAME }}")
+              core.setOutput("helm_tag", "${{ github.ref_name }}")
+              core.setOutput("helm_release_repo", "${{ vars.GHA_HELM_RELEASE_REPO }}")
+              core.setOutput("helm_folder","${{ vars.GHA_HELM_PROJECT_PRD }}" )
+              appVars = selectVarsBy(varsObj, '_PRD')
+              console.log("set production environment")
+            } else {
+              console.error("Unexpected environment")
+              process.exit(1)
+            }
+
+            const mergedEntries = [ ...selectVarsBy(varsObj, '_GLOBAL'), ...appVars ]
+            const file = mergedEntries.map(o => o.join('=')).join('\n')
+            const fileBase64 = Buffer.from(file).toString('base64')
+            core.setOutput("envFile", fileBase64)
+
+            console.log('APP public config variable:')
+            console.log(JSON.stringify(mergedEntries, null, 2))
+
+      - uses: actions/cache@v4
+        id: docker-cache
+        with:
+          path: |
+            /var/lib/docker
+          key: ${{ github.sha }}
+
+      - name: Log in to Azure Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.setenv.outputs.acr_name }}
+          username: ${{ steps.setenv.outputs.acr_username }}
+          password: ${{ steps.setenv.outputs.acr_password }}
+
+      - name: Build Docker Image
+        id: docker_build
+        run: |
+          docker build . -f ./Dockerfile -t ${{ steps.setenv.outputs.docker_tag }} $(for i in `cat .env`; do out+="--build-arg $i " ; done; echo $out;out="")
+
+      - name: Pushing Docker Image
+        id: docker_push
+        run: |
+          docker push ${{ steps.setenv.outputs.docker_tag }}
+
+  request_deployment_approval:
+    if: ${{ github.ref_type == 'tag' && (needs.build.outputs.environment == 'production' || needs.build.outputs.environment == 'jera') }}
+    needs: ['build']
+    environment: 'build'
+    runs-on: ["self-hosted","intellifish-be"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: application-commands
+        run: ${{ secrets.CLONE_COMMAND }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Run approval script
+        env:
+          SMTP_SERVER : "smtp.gmail.com"
+          IMAP_SERVER : "imap.gmail.com"
+          EMAIL_ADDRESS : ${{ secrets.EMAIL_USERNAME }}
+          EMAIL_PASSWORD : ${{ secrets.EMAIL_PASSWORD }}
+          PROJECT_ID : ${{ vars.PROJECT_ID }}
+          TAG : ${{ github.ref_name }}
+          APPROVERS: ${{ vars.APPROVERS }}
+          APPROVER_NAME : ${{ vars.APPROVERS_NAME }}
+        run: |
+          python3 application-scripts/Pipelines/approval/approval-oneperson.py
+
+  kustomize-release:
+     runs-on: ["self-hosted","intellifish-be"]
+     needs: ['request_deployment_approval','build']
+     if: ${{ !failure() && !cancelled() }}
+     environment: kustomize
+     env:
+       GITHUB_SA_USER: devops_extension@outlook.com
+       GITHUB_SA_EMAIL: devops-extension
+       ENV_FILEPATH: ./envs/config.env
+
+     steps:
+       - uses: actions/checkout@v4
+         with:
+           repository: ${{ needs.build.outputs.release_repo }}
+           ref: main
+           token: ${{ secrets.GITHUBTOKEN }}
+
+       - uses: actions/github-script@v7
+         name: Set environment
+         id: setenv
+         with:
+            script: |
+              const fs = require('node:fs')
+              const file = Buffer.from("${{ needs.build.outputs.envFile }}", 'base64').toString('ascii')
+              console.log("Decoded File Content:", file)
+              fs.writeFileSync("${{ needs.build.outputs.kustomize_folder }}/${{ env.ENV_FILEPATH }}", file, { encoding: 'utf8' })
+
+       - run: |
+           git config user.name "${{ env.GITHUB_SA_USER }}"
+           git config user.email "${{ env.GITHUB_SA_EMAIL }}"
+
+       - uses: imranismail/setup-kustomize@v2
+
+       - name: ${{ needs.build.outputs.environment_display }}
+         run: |
+            echo "Tag: ${{ needs.build.outputs.docker_tag }}"
+            kustomize edit set image ${{ needs.build.outputs.docker_tag }}
+            git add .
+            git commit -m "Pushing to ${{ needs.build.outputs.environment }} ${{ needs.build.outputs.docker_tag }}"
+            git push
+            ls -la
+         working-directory: ${{ needs.build.outputs.kustomize_folder }}
