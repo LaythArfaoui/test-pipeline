@@ -57,6 +57,10 @@ jobs:
 
             const stringToBool = (s) => s.toLowerCase() === "true"
 
+            // Get common values
+            const dockerhubUsername = "${{ vars.DOCKERHUB_USERNAME }}"
+            const imageName = "${{ vars.GHA_IMAGE_NAME }}"
+
             if (stringToBool(process.env.IS_DEV)) {
               core.setOutput("az_subscription_id", "${{ vars.GHA_AZ_SUBSCRIPTION_ID_DEV }}")
               core.setOutput("environment", "development")
@@ -65,10 +69,10 @@ jobs:
               core.setOutput("helm_release_repo", "${{ vars.GHA_HELM_RELEASE_REPO }}")
               core.setOutput("helm_folder","${{ vars.GHA_HELM_PROJECT_DEV }}" )
               core.setOutput("kustomize_folder","${{ vars.GHA_PROJECT_REPO_DEV }}" )
-              core.setOutput("dockerhub_username", "${{ vars.DOCKERHUB_USERNAME }}")
-              core.setOutput("docker_tag", `${{ vars.DOCKERHUB_USERNAME }}/${{ vars.GHA_IMAGE_NAME }}:${{ github.sha }}`)
+              core.setOutput("dockerhub_username", dockerhubUsername)
+              core.setOutput("docker_tag", `${dockerhubUsername}/${imageName}:${process.env.GITHUB_SHA}`)
               core.setOutput("helm_values_section_name", "${{ vars.GHA_HELM_VALUES_SECTION_NAME }}")
-              core.setOutput("helm_tag", "${{ github.sha }}")
+              core.setOutput("helm_tag", process.env.GITHUB_SHA)
               appVars = selectVarsBy(varsObj, '_DEV')
               console.log("set development environment")
             } else if (stringToBool(process.env.IS_STAGING)) {
@@ -77,10 +81,10 @@ jobs:
               core.setOutput("environment_display", "Staging")
               core.setOutput("release_repo", "${{ vars.GHA_RELEASE_REPO_STG }}")
               core.setOutput("kustomize_folder","${{ vars.GHA_PROJECT_REPO_STG }}" )
-              core.setOutput("dockerhub_username", "${{ vars.DOCKERHUB_USERNAME }}")
-              core.setOutput("docker_tag", `${{ vars.DOCKERHUB_USERNAME }}/${{ vars.GHA_IMAGE_NAME }}:${{ github.ref_name }}`)
+              core.setOutput("dockerhub_username", dockerhubUsername)
+              core.setOutput("docker_tag", `${dockerhubUsername}/${imageName}:${process.env.GITHUB_REF_NAME}`)
               core.setOutput("helm_values_section_name", "${{ vars.GHA_HELM_VALUES_SECTION_NAME}}")
-              core.setOutput("helm_tag", "${{ github.ref_name }}")
+              core.setOutput("helm_tag", process.env.GITHUB_REF_NAME)
               core.setOutput("helm_release_repo", "${{ vars.GHA_HELM_RELEASE_REPO }}")
               core.setOutput("helm_folder","${{ vars.GHA_HELM_PROJECT_STG }}" )
               appVars = selectVarsBy(varsObj, '_STG')
@@ -91,10 +95,10 @@ jobs:
               core.setOutput("environment_display", "Production")
               core.setOutput("release_repo", "${{ vars.GHA_RELEASE_REPO_PRD }}")
               core.setOutput("kustomize_folder","${{ vars.GHA_PROJECT_REPO_PRD }}" )
-              core.setOutput("dockerhub_username", "${{ vars.DOCKERHUB_USERNAME }}")
-              core.setOutput("docker_tag", `${{ vars.DOCKERHUB_USERNAME }}/${{ vars.GHA_IMAGE_NAME }}:${{ github.ref_name }}`)
+              core.setOutput("dockerhub_username", dockerhubUsername)
+              core.setOutput("docker_tag", `${dockerhubUsername}/${imageName}:${process.env.GITHUB_REF_NAME}`)
               core.setOutput("helm_values_section_name", "${{ vars.GHA_HELM_VALUES_SECTION_NAME }}")
-              core.setOutput("helm_tag", "${{ github.ref_name }}")
+              core.setOutput("helm_tag", process.env.GITHUB_REF_NAME)
               core.setOutput("helm_release_repo", "${{ vars.GHA_HELM_RELEASE_REPO }}")
               core.setOutput("helm_folder","${{ vars.GHA_HELM_PROJECT_PRD }}" )
               appVars = selectVarsBy(varsObj, '_PRD')
@@ -128,7 +132,14 @@ jobs:
       - name: Build Docker Image
         id: docker_build
         run: |
-          docker build . -f ./Dockerfile -t ${{ steps.setenv.outputs.docker_tag }} $(for i in `cat .env`; do out+="--build-arg $i " ; done; echo $out;out="")
+          # Check if .env file exists and build accordingly
+          if [ -f .env ]; then
+            echo "Building with .env file"
+            docker build . -f ./Dockerfile -t ${{ steps.setenv.outputs.docker_tag }} $(for i in `cat .env`; do out+="--build-arg $i " ; done; echo $out;out="")
+          else
+            echo "Building without .env file"
+            docker build . -f ./Dockerfile -t ${{ steps.setenv.outputs.docker_tag }}
+          fi
 
       - name: Pushing Docker Image
         id: docker_push
